@@ -381,8 +381,11 @@ static __strong NSData *CRLFCRLF;
     [_inputStream close];
     [_outputStream close];
     
-    sr_dispatch_release(_workQueue);
+    // PULL: block on dealloc until all work queue tasks are finished
+    dispatch_queue_t blockQueue = _workQueue;
     _workQueue = NULL;
+    dispatch_sync( blockQueue, ^{} ); // block until the work queue is empty
+    sr_dispatch_release(blockQueue);
     
     if (_receivedHTTPHeaders) {
         CFRelease(_receivedHTTPHeaders);
@@ -1172,6 +1175,11 @@ static const char CRLFCRLFBytes[] = {'\r', '\n', '\r', '\n'};
     BOOL didWork = NO;
     
     if (self.readyState >= SR_CLOSING) {
+        // PULL: Fix: memory leak and lack of actually closing the WebSocket.
+        dispatch_async(_workQueue, ^{
+            _closeCode = SRStatusCodeNormal;
+            [self _disconnect];
+        });
         return didWork;
     }
     
